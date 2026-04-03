@@ -11,12 +11,12 @@ The full guide, including installation, hardware recommendations, performance tu
 👉 **[Go to the Wiki](https://github.com/christoph/the-ollama-handbook/wiki)**
 
 ### Quick Links:
-- [[Why Local AI?]]
-- [[Installation]]
-- [[Quick Start]]
-- [[CLI Cheat Sheet]]
-- [[Models by Use Case]]
-- [[Troubleshooting]]
+- [Why Local AI?](https://github.com/pinguiscodex/the-ollama-handbook/wiki/Why-Local-AI)
+- [Installation](https://github.com/pinguiscodex/the-ollama-handbook/wiki/Installation)
+- [Quick Start](https://github.com/pinguiscodex/the-ollama-handbook/wiki/Quick-Start)
+- [CLI Cheat Sheet](https://github.com/pinguiscodex/the-ollama-handbook/wiki/CLI-Cheat-Sheet)
+- [Models by Use Case](https://github.com/pinguiscodex/the-ollama-handbook/wiki/Models-by-Use-Case)
+- [Troubleshooting](https://github.com/pinguiscodex/the-ollama-handbook/wiki/Troubleshooting)
 
 ***
 
