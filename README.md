@@ -8,7 +8,7 @@ Welcome to the **Ollama Handbook**! This project is a complete guide to hosting,
 
 The full guide, including installation, hardware recommendations, performance tuning, and troubleshooting, has been moved to our wiki:
 
-👉 **[Go to the Wiki](https://github.com/christoph/the-ollama-handbook/wiki)**
+👉 **[Go to the Wiki](https://github.com/pinguiscodex/the-ollama-handbook/wiki)**
 
 ### Quick Links:
 - [Why Local AI?](https://github.com/pinguiscodex/the-ollama-handbook/wiki/Why-Local-AI)
@@ -20,18 +20,6 @@ The full guide, including installation, hardware recommendations, performance tu
 
 ***
 
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-***
-
-<div align="center">
-
-**Made with ❤️ by the Local AI Community**
-
-</div>
+This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details.
