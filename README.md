@@ -3,6 +3,10 @@
 > **Run powerful AI models 100% offline, free, and private on your own hardware.**  
 > A complete guide to hosting, configuring, and using local LLMs for coding, chat, reasoning, and more.
 
+[
+[
+[
+
 ***
 
 ## 📋 Table of Contents
@@ -22,6 +26,9 @@
 - [Troubleshooting](#troubleshooting)
 - [Advanced Topics](#advanced-topics)
 - [Resources](#resources)
+- [**🔥 NEW: AMD GPU Setup Guide (ROCm & Vulkan)**](#-amd-gpu-setup-guide-rocm--vulkan)
+- [**🔥 NEW: User Service vs System Service**](#-user-service-vs-system-service)
+- [**🔥 NEW: Real-World Troubleshooting Cases**](#-real-world-troubleshooting-cases)
 
 ***
 
@@ -967,6 +974,542 @@ http {
 
 ***
 
+## 🔥 AMD GPU Setup Guide (ROCm & Vulkan)
+
+### Why This Matters
+
+AMD GPU support in Ollama has improved dramatically in 2025–2026, but **RDNA4 cards (RX 9000 series)** like the RX 9060 XT require special configuration. This guide covers both **ROCm** (native, best performance) and **Vulkan** (fallback, still great).
+
+***
+
+### Hardware Requirements
+
+| GPU Series | Architecture | Backend | Status |
+|------------|--------------|---------|--------|
+| RX 6000–7000 | RDNA2/3 | ROCm | ✅ Fully supported |
+| RX 9000 | RDNA4 | ROCm | ✅ Supported (GFX1200) |
+| Integrated Radeon 780M | RDNA3 | ROCm/Vulkan | ✅ Supported |
+| Older GCN cards | GCN/RDNA1 | Vulkan | ⚠️ Fallback only |
+
+***
+
+### Option 1: ROCm (Best Performance)
+
+#### Step 1: Install ROCm Dependencies
+
+**Arch/CachyOS:**
+```bash
+sudo pacman -S rocm-hip-sdk rocm-opencl-runtime
+```
+
+**Ubuntu/Debian:**
+```bash
+sudo apt install rocm-hip-sdk rocm-opencl-runtime
+```
+
+#### Step 2: Set GPU Environment Variables
+
+For **RDNA4 (RX 9060 XT, RX 9070, etc.)**:
+```bash
+export HSA_OVERRIDE_GFX_VERSION=12.0.0
+export ROCR_VISIBLE_DEVICES=0
+export HIP_VISIBLE_DEVICES=0
+```
+
+For **RDNA3 (RX 7000 series)**:
+```bash
+export HSA_OVERRIDE_GFX_VERSION=11.0.0
+export ROCR_VISIBLE_DEVICES=0
+```
+
+#### Step 3: Test GPU Detection
+
+```bash
+# Check Vulkan detection (works for all AMD GPUs)
+vulkaninfo --summary | grep -i "deviceName"
+# Should show: AMD Radeon RX 9060 XT (RADV GFX1200)
+
+# Check ROCm detection
+rocminfo | grep -i "name"  # May not work on all setups
+```
+
+#### Step 4: Run Ollama with ROCm
+
+**Manual (testing):**
+```bash
+HSA_OVERRIDE_GFX_VERSION=12.0.0 ROCR_VISIBLE_DEVICES=0 ollama serve
+```
+
+**Systemd service (permanent):**
+```bash
+# Create user service directory
+mkdir -p ~/.config/systemd/user
+
+# Create service file
+cat > ~/.config/systemd/user/ollama.service << EOF
+[Unit]
+Description=Ollama Service (User Mode)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ollama serve
+Environment="HSA_OVERRIDE_GFX_VERSION=12.0.0"
+Environment="ROCR_VISIBLE_DEVICES=0"
+Environment="HIP_VISIBLE_DEVICES=0"
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
+EOF
+
+# Enable and start
+systemctl --user daemon-reload
+systemctl --user enable --now ollama
+
+# Check status
+systemctl --user status ollama
+```
+
+#### Step 5: Verify GPU Offload
+
+```bash
+# Run a model
+ollama run qwen2.5-coder:7b-instruct "Hello" &
+sleep 10
+
+# Check GPU usage
+ollama ps
+# Should show: 70–90% GPU / 10–30% CPU
+```
+
+**Success indicators in logs:**
+```
+inference compute ... id=GPU-xxx library=ROCm compute=gfx1200
+offloaded 39/49 layers to GPU
+```
+
+***
+
+### Option 2: Vulkan (Fallback, Still Great)
+
+If ROCm doesn't work or your GPU isn't fully supported:
+
+#### Step 1: Enable Vulkan Backend
+
+```bash
+# Manual test
+OLLAMA_VULKAN=1 GGML_VK_VISIBLE_DEVICES=0 ollama serve
+```
+
+#### Step 2: User Service with Vulkan
+
+```bash
+cat > ~/.config/systemd/user/ollama.service << EOF
+[Unit]
+Description=Ollama Service (User Mode)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ollama serve
+Environment="OLLAMA_VULKAN=1"
+Environment="GGML_VK_VISIBLE_DEVICES=0"
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
+EOF
+
+systemctl --user daemon-reload
+systemctl --user enable --now ollama
+```
+
+#### Step 3: Verify
+
+```bash
+ollama ps
+# Should show: 100% GPU (Vulkan) or GPU/CPU split
+```
+
+**Expected Performance:**
+- ROCm: 20–50 tokens/sec (7B model), 10–25 tokens/sec (30B model)
+- Vulkan: 15–40 tokens/sec (7B), 8–20 tokens/sec (30B)
+- CPU-only: 1–5 tokens/sec (7B), 0.5–2 tokens/sec (30B)
+
+***
+
+### Modelfiles for AMD GPUs
+
+#### Large Models (30B+) with Limited VRAM
+
+```dockerfile
+# Modelfile for qwen3-coder-30b-safe
+FROM qwen3-coder:30b
+PARAMETER num_ctx 32768
+PARAMETER num_gpu 99
+PARAMETER temperature 0.5
+PARAMETER top_p 0.85
+```
+
+```bash
+ollama create qwen3-coder-30b-safe -f Modelfile
+```
+
+This reduces context to fit in VRAM while maximizing GPU offload.
+
+***
+
+### AMD GPU Troubleshooting
+
+#### Issue: "0% GPU, 100% CPU"
+
+**Check:**
+```bash
+# Verify Vulkan works
+vulkaninfo --summary | grep "deviceName"
+
+# Check Ollama logs
+journalctl --user -u ollama -f | grep -i "gpu\|rocm\|vulkan"
+```
+
+**Fix:**
+```bash
+# Try Vulkan fallback
+OLLAMA_VULKAN=1 ollama serve
+```
+
+#### Issue: ROCm Crash on Startup
+
+**Symptoms:** `rocblas_abort` or segmentation fault in logs.
+
+**Fix:** Remove ROCm vars and use Vulkan:
+```bash
+# Edit user service
+systemctl --user edit ollama
+
+# Remove HSA_OVERRIDE_GFX_VERSION and ROCR_VISIBLE_DEVICES
+# Keep only:
+Environment="OLLAMA_VULKAN=1"
+Environment="GGML_VK_VISIBLE_DEVICES=0"
+```
+
+#### Issue: Permission Denied on Home Directory
+
+**Error:** `mkdir /home/christoph: permission denied`
+
+**Cause:** System service running as `ollama` user can't access your home directory.
+
+**Fix:** Use **user service** instead of system service:
+```bash
+# Stop system service
+sudo systemctl stop ollama
+sudo systemctl disable ollama
+
+# Use user service (runs as your user)
+systemctl --user enable --now ollama
+```
+
+***
+
+## 🔥 User Service vs System Service
+
+### Why User Service?
+
+| Feature | System Service | User Service |
+|---------|----------------|--------------|
+| **Runs as** | `ollama` user (root-managed) | Your user account |
+| **Model location** | `/var/lib/ollama/models/` | `~/.ollama/models/` |
+| **Home dir access** | ❌ No (permission issues) | ✅ Yes |
+| **Auto-start** | On boot | On login (or with linger) |
+| **GPU access** | ⚠️ Complex setup | ✅ Automatic |
+| **Best for** | Multi-user servers | Personal laptops/desktops |
+
+**Recommendation:** Use **user service** for personal machines, especially with AMD GPUs.
+
+***
+
+### Setup User Service (Recommended)
+
+#### Step 1: Disable System Service
+
+```bash
+sudo systemctl stop ollama
+sudo systemctl disable ollama
+# Optional: remove completely
+sudo rm -f /etc/systemd/system/ollama.service
+sudo rm -rf /etc/systemd/system/ollama.service.d/
+sudo systemctl daemon-reload
+```
+
+#### Step 2: Create User Service
+
+```bash
+mkdir -p ~/.config/systemd/user
+
+cat > ~/.config/systemd/user/ollama.service << EOF
+[Unit]
+Description=Ollama Service (User Mode)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ollama serve
+Environment="OLLAMA_VULKAN=1"
+Environment="GGML_VK_VISIBLE_DEVICES=0"
+# Or for ROCm:
+# Environment="HSA_OVERRIDE_GFX_VERSION=12.0.0"
+# Environment="ROCR_VISIBLE_DEVICES=0"
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
+EOF
+
+# Enable and start
+systemctl --user daemon-reload
+systemctl --user enable --now ollama
+```
+
+#### Step 3: Optional – Enable Linger (24/7 Operation)
+
+If you want Ollama running even when logged out:
+
+```bash
+sudo loginctl enable-linger christoph
+```
+
+**Check status:**
+```bash
+loginctl show-user christoph | grep Linger
+# Should show: Linger=yes
+```
+
+**To disable later:**
+```bash
+sudo loginctl disable-linger christoph
+```
+
+#### Step 4: Verify
+
+```bash
+# Check service status
+systemctl --user status ollama
+
+# List models
+ollama list
+
+# Test GPU usage
+ollama run qwen2.5-coder:7b-instruct "Hello" &
+sleep 10
+ollama ps
+```
+
+***
+
+### User Service Commands
+
+```bash
+# Start/stop/restart
+systemctl --user start ollama
+systemctl --user stop ollama
+systemctl --user restart ollama
+
+# Check status
+systemctl --user status ollama
+systemctl --user is-active ollama
+
+# View logs
+journalctl --user -u ollama -f
+
+# Reset failure counter (if stuck)
+systemctl --user reset-failed ollama
+```
+
+***
+
+## 🔥 Real-World Troubleshooting Cases
+
+### Case 1: RX 9060 XT – 100% CPU, RAM Flooding, Crashes
+
+**User:** Christoph, CachyOS, RX 9060 XT 16GB, 16GB RAM  
+**Problem:** qwen3-coder:30b loads entirely into RAM, floods swap, crashes PC.
+
+**Symptoms:**
+```
+offloading 0 repeating layers to GPU
+offloaded 0/49 layers to GPU
+model weights device=CPU size="17.3 GiB"
+```
+
+**Root Cause:** Ollama system service couldn't access home directory, ROCm not configured.
+
+**Solution:**
+
+1. **Switch to user service:**
+```bash
+sudo systemctl stop ollama
+sudo systemctl disable ollama
+systemctl --user enable --now ollama
+```
+
+2. **Enable ROCm for RDNA4:**
+```bash
+# Edit user service
+systemctl --user edit ollama
+
+# Add:
+[Service]
+Environment="HSA_OVERRIDE_GFX_VERSION=12.0.0"
+Environment="ROCR_VISIBLE_DEVICES=0"
+```
+
+3. **Create safe Modelfile:**
+```dockerfile
+FROM qwen3-coder:30b
+PARAMETER num_ctx 32768
+PARAMETER num_gpu 99
+PARAMETER temperature 0.5
+EOF
+
+ollama create qwen3-coder-30b-safe -f Modelfile
+```
+
+**Result:**
+```
+offloaded 39/49 layers to GPU
+79% GPU / 21% CPU
+No more crashes!
+```
+
+***
+
+### Case 2: "Model Does Not Support Tools" Error
+
+**User:** Trying to use Claude Code with deepseek-coder  
+**Error:** `API Error: 400 {"error":{"message":"deepseek-coder:latest does not support tools"}}`
+
+**Root Cause:** Base `deepseek-coder` lacks function/tool calling support required by agentic tools.
+
+**Solution:**
+```bash
+# Use a compatible model
+ollama pull qwen2.5-coder:7b-instruct
+
+# Create 64K context Modelfile
+cat > Modelfile << EOF
+FROM qwen2.5-coder:7b-instruct
+PARAMETER num_ctx 65536
+EOF
+
+ollama create qwen2.5-coder-7b-64k -f Modelfile
+
+# Use with Claude Code
+ollama launch claude --model qwen2.5-coder-7b-64k
+```
+
+**Compatible models for Claude Code:**
+- ✅ `qwen2.5-coder:*-instruct` (all sizes)
+- ✅ `qwen3-coder:*` (all sizes)
+- ✅ `deepseek-coder-v2:*` (V2 only, not V1)
+- ✅ `llama3.*-instruct`
+- ❌ `deepseek-coder:latest` (V1, no tool support)
+- ❌ `codellama:*` (limited tool support)
+
+***
+
+### Case 3: Models Disappear After Reinstall
+
+**User:** Reinstalled Ollama, now `ollama list` shows nothing.
+
+**Root Cause:** Models are in `~/.ollama/models/`, but system service looks in `/var/lib/ollama/models/`.
+
+**Solution:**
+
+**Option A: Point system service to home directory**
+```bash
+sudo systemctl edit ollama
+
+# Add:
+[Service]
+Environment="OLLAMA_MODELS=/home/christoph/.ollama/models"
+```
+
+**Option B (Better): Use user service**
+```bash
+sudo systemctl stop ollama
+sudo systemctl disable ollama
+systemctl --user enable --now ollama
+```
+
+Models are automatically found in `~/.ollama/models/`.
+
+***
+
+### Case 4: Port Already in Use
+
+**Error:** `listen tcp 127.0.0.1:11434: bind: address already in use`
+
+**Cause:** Multiple Ollama instances running (manual + systemd).
+
+**Fix:**
+```bash
+# Kill all instances
+pkill -9 ollama
+
+# Wait 2 seconds
+sleep 2
+
+# Start only one
+systemctl --user start ollama
+```
+
+**Prevent recurrence:**
+```bash
+# Check what's running
+ps aux | grep ollama
+ss -tlnp | grep 11434
+
+# Stop system service if using user service
+sudo systemctl stop ollama
+sudo systemctl disable ollama
+```
+
+***
+
+### Case 5: Systemd Service Fails After Edit
+
+**Error:** Service won't start after editing override.conf.
+
+**Symptoms:**
+```
+Active: failed (Result: exit-code)
+Start request repeated too quickly
+```
+
+**Fix:**
+```bash
+# Reset failure counter
+systemctl --user reset-failed ollama
+
+# Check for syntax errors
+systemctl --user cat ollama
+
+# Fix override file
+systemctl --user edit ollama
+
+# Restart
+systemctl --user restart ollama
+
+# View detailed logs
+journalctl --user -u ollama -n 50 --no-pager
+```
+
+***
+
 ## 📚 Resources
 
 ### Official Links
@@ -975,6 +1518,7 @@ http {
 - [Ollama GitHub](https://github.com/ollama/ollama)
 - [Model Library](https://ollama.com/library)
 - [Documentation](https://github.com/ollama/ollama/blob/main/docs/modelfile.md)
+- [AMD GPU Guide](https://docs.ollama.com/gpu)
 
 ### Community
 
@@ -994,6 +1538,12 @@ http {
 - [Continue.dev](https://continue.dev)
 - [Aider](https://aider.chat)
 - [Open WebUI](https://openwebui.com)
+
+### AMD-Specific Resources
+
+- [ROCm Documentation](https://rocm.docs.amd.com)
+- [RDNA4 GFX1200 Support Thread](https://github.com/ollama/ollama/issues/8679)
+- [Vulkan Backend Guide](https://github.com/ggerganov/llama.cpp/blob/master/docs/build-vulkan.md)
 
 ***
 
@@ -1021,6 +1571,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [Meta AI](https://ai.meta.com) for Llama models
 - [Alibaba Cloud](https://www.alibabacloud.com) for Qwen models
 - [DeepSeek](https://deepseek.com) for coding models
+- [AMD](https://amd.com) for ROCm and open GPU drivers
 - The entire open-source AI community
 
 ***
@@ -1028,6 +1579,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 <div align="center">
 
 **Made with ❤️ by the Local AI Community**
+
+*Special thanks to real-world users whose troubleshooting journeys made this guide possible.*
 
 [⬆ Back to Top](#-local-ai-models-with-ollama)
 
