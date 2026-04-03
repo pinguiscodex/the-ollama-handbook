@@ -3,10 +3,6 @@
 > **Run powerful AI models 100% offline, free, and private on your own hardware.**  
 > A complete guide to hosting, configuring, and using local LLMs for coding, chat, reasoning, and more.
 
-[
-[
-[
-
 ***
 
 ## 📋 Table of Contents
