@@ -1,0 +1,11 @@
+{
+    "recommendations": [
+        "codezombiech.gitignore",
+        "donjayamanne.githistory",
+        "eamodio.gitlens"
+    ],
+    "unwantedRecommendations": [
+        "bmewburn.vscode-intelephense-client",
+        "ritwickdey.liveserver"
+    ]
+}
